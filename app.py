@@ -4,45 +4,43 @@ from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 import googleapiclient.discovery
 import googleapiclient.http
+from groq import Groq
 from openai import OpenAI
 import streamlit as st
 
 st.set_page_config(
-    page_title="YouTube Shorts AI Uploader", page_icon="🚀", layout="centered"
+    page_title="YouTube Shorts Uploader", page_icon="🎬", layout="centered"
 )
 
-st.title("🎬 AI YouTube Shorts Generator & Uploader")
+st.title("🎬 Streamlit YouTube Shorts Automation")
 st.markdown(
-    "Upload your raw videos. This app transcribes them using **Groq Whisper**"
-    " (Free), generates titles & descriptions via AI, and uploads them straight"
-    " to your YouTube channel!"
+    "Upload your videos below. The app will transcribe them using **Groq"
+    " Whisper**, generate titles and descriptions using AI, and upload them"
+    " directly to YouTube!"
 )
 
 # --- SIDEBAR CONFIGURATION ---
-st.sidebar.header("API & Credentials")
+st.sidebar.header("API Keys Setup")
 groq_api_key = st.sidebar.text_input(
-    "Groq API Key (Free tier)",
+    "Groq API Key (Free)",
     type="password",
-    help="Get a free key from console.groq.com",
+    help="Get your free key from console.groq.com",
 )
 openrouter_api_key = st.sidebar.text_input(
     "OpenRouter API Key (Optional)", type="password"
 )
 
 st.sidebar.markdown("---")
-st.sidebar.markdown("### YouTube Authentication")
-has_youtube_secrets = (
-    "youtube" in st.secrets
-    and "refresh_token" in st.secrets["youtube"]
-)
-if has_youtube_secrets:
-  st.sidebar.success("✅ YouTube Secrets Configured")
+st.sidebar.markdown("### YouTube Status")
+has_secrets = "youtube" in st.secrets and "refresh_token" in st.secrets["youtube"]
+if has_secrets:
+  st.sidebar.success("✅ YouTube Secrets Loaded")
 else:
   st.sidebar.error("❌ YouTube Secrets missing in Streamlit settings!")
 
-# --- MAIN UPLOAD SECTION ---
+# --- MULTIPLE FILE UPLOADER ---
 uploaded_files = st.file_uploader(
-    "Select Video Files (MP4, MOV, MKV)",
+    "Choose video files to upload",
     type=["mp4", "mov", "mkv", "avi"],
     accept_multiple_files=True,
 )
@@ -55,19 +53,13 @@ if uploaded_files:
       st.error("Please provide your Groq API Key in the sidebar.")
       st.stop()
 
-    if not has_youtube_secrets:
-      st.error(
-          "YouTube credentials not configured in Streamlit Secrets. Check setup"
-          " instructions."
-      )
+    if not has_secrets:
+      st.error("YouTube credentials are not configured in Streamlit Secrets.")
       st.stop()
 
     # Initialize Clients
-    groq_client = OpenAI(
-        base_url="https://api.groq.com/openai/v1", api_key=groq_api_key
-    )
+    groq_client = Groq(api_key=groq_api_key)
 
-    # Setup YouTube service using Streamlit Secrets
     try:
       creds_info = st.secrets["youtube"]
       creds = Credentials(
@@ -83,14 +75,14 @@ if uploaded_files:
           "youtube", "v3", credentials=creds
       )
     except Exception as e:
-      st.error(f"Failed to authenticate YouTube API: {e}")
+      st.error(f"YouTube Authentication Failed: {e}")
       st.stop()
 
-    # Process each video sequentially
+    # Process each uploaded video one by one
     for idx, uploaded_file in enumerate(uploaded_files):
-      st.markdown(f"--- \nProcessing **{uploaded_file.name}**")
+      st.markdown(f"--- \n### Processing: {uploaded_file.name}")
 
-      # Save file to a temporary runner path
+      # Save uploaded file temporarily to disk for processing
       with tempfile.NamedTemporaryFile(
           delete=False, suffix=os.path.splitext(uploaded_file.name)[1]
       ) as tmp_file:
@@ -99,23 +91,19 @@ if uploaded_files:
 
       try:
         # 1. Transcribe via Groq Whisper API (Free & Fast)
-        with st.spinner("Transcribing video audio..."):
+        with st.spinner("Transcribing audio..."):
           with open(tmp_path, "rb") as audio_file:
             transcript_res = groq_client.audio.transcriptions.create(
                 model="whisper-large-v3-turbo", file=audio_file
             )
-            transcript_text = (
-                transcript_res.text
-                if hasattr(transcript_res, "text")
-                else transcript_res["text"]
-            )
+            transcript_text = transcript_res.text
 
         st.text_area(
-            "Transcript Preview", transcript_text, height=90, key=f"tr_{idx}"
+            "Transcript Preview", transcript_text, height=80, key=f"tr_{idx}"
         )
 
-        # 2. Generate Title & Description
-        with st.spinner("Generating YouTube Shorts title & description..."):
+        # 2. Generate Title & Description via AI
+        with st.spinner("Generating title & description..."):
           prompt = f"""
                     Based on this transcript, generate a catchy YouTube Short title (max 60 chars, optimized for engagement) and an engaging description with relevant hashtags (#Shorts included).
                     
@@ -157,7 +145,7 @@ if uploaded_files:
               "snippet": {
                   "title": f"{title} #Shorts",
                   "description": description,
-                  "tags": ["shorts", "automation", "ai"],
+                  "tags": ["shorts", "automation"],
                   "categoryId": "22",
               },
               "status": {"privacyStatus": "public"},
@@ -174,9 +162,10 @@ if uploaded_files:
           while response is None:
             status, response = request.next_chunk()
 
+          video_id = response.get("id")
           st.success(
-              f"Uploaded Successfully! Video ID: {response.get('id')} 🔗"
-              f" https://youtu.be/{response.get('id')}"
+              f"Successfully Uploaded! Video ID: {video_id} 🔗"
+              f" https://youtu.be/{video_id}"
           )
 
       except Exception as e:
