@@ -196,7 +196,7 @@ with tab1:
 
 
 # ==========================================
-# TAB 2: VIDEO DOWNLOADER (Updated & Fixed)
+# TAB 2: VIDEO DOWNLOADER (Fixed with Android Client Bypass)
 # ==========================================
 with tab2:
     st.markdown("📥 **Download videos from YouTube or supported platforms using `yt-dlp`**")
@@ -210,12 +210,13 @@ with tab2:
             with tempfile.TemporaryDirectory() as tmpdirname:
                 output_template = os.path.join(tmpdirname, '%(title)s.%(ext)s')
                 
-                # Fixed ydl_opts using format 'b' to avoid split stream merging issues on cloud servers
                 ydl_opts = {
-                    'format': 'b',
+                    'format': 'bestvideo+bestaudio/best',
                     'outtmpl': output_template,
                     'noplaylist': True,
                     'geo_bypass': True,
+                    # Forces yt-dlp to use android/web clients to prevent format blocks & n-sig signature errors
+                    'extractor_args': {'youtube': {'player_client': ['android', 'web']}},
                     'http_headers': {
                         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
                     },
