@@ -196,12 +196,12 @@ with tab1:
 
 
 # ==========================================
-# TAB 2: VIDEO DOWNLOADER (New Functionality)
+# TAB 2: VIDEO DOWNLOADER (Updated & Fixed)
 # ==========================================
 with tab2:
     st.markdown("📥 **Download videos from YouTube or supported platforms using `yt-dlp`**")
     
-    video_url = st.text_input("Enter Video URL (YouTube, TikTok, etc.)", placeholder="https://www.youtube.com/watch?v=...")
+    video_url = st.text_input("Enter Video URL (YouTube, TikTok, etc.)", placeholder="https://www.youtube.com/watch?v=...", key="url_input_tab2")
     
     if st.button("Download Video", type="primary", key="btn_download"):
         if not video_url:
@@ -210,10 +210,15 @@ with tab2:
             with tempfile.TemporaryDirectory() as tmpdirname:
                 output_template = os.path.join(tmpdirname, '%(title)s.%(ext)s')
                 
+                # Fixed ydl_opts using format 'b' to avoid split stream merging issues on cloud servers
                 ydl_opts = {
-                    'format': 'best',
+                    'format': 'b',
                     'outtmpl': output_template,
                     'noplaylist': True,
+                    'geo_bypass': True,
+                    'http_headers': {
+                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                    },
                 }
                 
                 try:
@@ -231,7 +236,8 @@ with tab2:
                             label="💾 Save Video to Device",
                             data=file_bytes,
                             file_name=os.path.basename(filename),
-                            mime="video/mp4"
+                            mime="video/mp4",
+                            key="download_media_btn"
                         )
                 except Exception as e:
                     st.error(f"❌ Failed to download video: {e}")
