@@ -103,7 +103,7 @@ if uploaded_files:
                 base_url="https://openrouter.ai/api/v1",
                 api_key=openrouter_api_key,
             )
-            model_name = "anthropic/claude-3.5-sonnet"
+            model_name = "google/gemma-4-31b-it:free"
           else:
             ai_client = groq_client
             model_name = "llama-3.3-70b-versatile"  # Free on Groq
