@@ -14,29 +14,17 @@ st.set_page_config(
 
 st.title("🎬 Streamlit YouTube Shorts Automation")
 st.markdown(
-    "Upload your videos below. The app will transcribe them using **Groq"
-    " Whisper**, generate titles and descriptions using AI, and upload them"
-    " directly to YouTube!"
+    "Upload your video files below. The app will transcribe them using **Groq"
+    " Whisper** (Free), generate optimized titles & descriptions via AI, and"
+    " upload them straight to your YouTube channel!"
 )
 
-# --- SIDEBAR CONFIGURATION ---
-st.sidebar.header("API Keys Setup")
-groq_api_key = st.sidebar.text_input(
-    "Groq API Key (Free)",
-    type="password",
-    help="Get your free key from console.groq.com",
-)
-openrouter_api_key = st.sidebar.text_input(
-    "OpenRouter API Key (Optional)", type="password"
-)
-
-st.sidebar.markdown("---")
-st.sidebar.markdown("### YouTube Status")
-has_secrets = "youtube" in st.secrets and "refresh_token" in st.secrets["youtube"]
-if has_secrets:
-  st.sidebar.success("✅ YouTube Secrets Loaded")
-else:
-  st.sidebar.error("❌ YouTube Secrets missing in Streamlit settings!")
+# --- CHECK SECRETS CONFIGURATION ---
+if "youtube" not in st.secrets or "groq" not in st.secrets:
+  st.error(
+      "❌ Missing configuration! Please check your Streamlit Secrets (`secrets.toml`)."
+  )
+  st.stop()
 
 # --- MULTIPLE FILE UPLOADER ---
 uploaded_files = st.file_uploader(
@@ -49,16 +37,11 @@ if uploaded_files:
   st.info(f"Loaded {len(uploaded_files)} video(s) ready for processing.")
 
   if st.button("Start Processing & Uploading", type="primary"):
-    if not groq_api_key:
-      st.error("Please provide your Groq API Key in the sidebar.")
-      st.stop()
+    # Initialize Clients from st.secrets
+    groq_client = Groq(api_key=st.secrets["groq"]["api_key"])
 
-    if not has_secrets:
-      st.error("YouTube credentials are not configured in Streamlit Secrets.")
-      st.stop()
-
-    # Initialize Clients
-    groq_client = Groq(api_key=groq_api_key)
+    # Optional OpenRouter setup from secrets
+    openrouter_api_key = st.secrets.get("openrouter", {}).get("api_key", "")
 
     try:
       creds_info = st.secrets["youtube"]
@@ -91,7 +74,7 @@ if uploaded_files:
 
       try:
         # 1. Transcribe via Groq Whisper API (Free & Fast)
-        with st.spinner("Transcribing audio..."):
+        with st.spinner("Transcribing audio using free Groq Whisper..."):
           with open(tmp_path, "rb") as audio_file:
             transcript_res = groq_client.audio.transcriptions.create(
                 model="whisper-large-v3-turbo", file=audio_file
