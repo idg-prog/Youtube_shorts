@@ -1,4 +1,5 @@
 import os
+import subprocess
 import tempfile
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
@@ -9,26 +10,23 @@ from openai import OpenAI
 import streamlit as st
 
 st.set_page_config(
-    page_title="YouTube Shorts Uploader", page_icon="🎬", layout="centered"
+    page_title="YouTube Shorts Auto-Uploader", page_icon="🎬", layout="centered"
 )
 
-st.title("🎬 Streamlit YouTube Shorts Automation")
+st.title("🎬 YouTube Shorts Automated Uploader")
 st.markdown(
-    "Upload your video files below. The app will transcribe them using **Groq"
-    " Whisper** (Free), generate optimized titles & descriptions via AI, and"
-    " upload them straight to your YouTube channel!"
+    "Upload your video files. The app will extract compressed audio, transcribe"
+    " via **Groq Whisper**, and upload them to YouTube!"
 )
 
-# --- CHECK SECRETS CONFIGURATION ---
+# --- CONFIGURATION CHECK ---
 if "youtube" not in st.secrets or "groq" not in st.secrets:
-  st.error(
-      "❌ Missing configuration! Please check your Streamlit Secrets (`secrets.toml`)."
-  )
+  st.error("❌ Missing `[youtube]` or `[groq]` credentials in Streamlit Secrets.")
   st.stop()
 
-# --- MULTIPLE FILE UPLOADER ---
+# --- FILE UPLOADER ---
 uploaded_files = st.file_uploader(
-    "Choose video files to upload",
+    "Select video files (MP4, MOV, MKV)",
     type=["mp4", "mov", "mkv", "avi"],
     accept_multiple_files=True,
 )
@@ -37,19 +35,17 @@ if uploaded_files:
   st.info(f"Loaded {len(uploaded_files)} video(s) ready for processing.")
 
   if st.button("Start Processing & Uploading", type="primary"):
-    # Initialize Clients from st.secrets
     groq_client = Groq(api_key=st.secrets["groq"]["api_key"])
-
-    # Optional OpenRouter setup from secrets
     openrouter_api_key = st.secrets.get("openrouter", {}).get("api_key", "")
 
+    # Authenticate YouTube
     try:
-      creds_info = st.secrets["youtube"]
+      yt_secrets = st.secrets["youtube"]
       creds = Credentials(
           token=None,
-          refresh_token=creds_info["refresh_token"],
-          client_id=creds_info["client_id"],
-          client_secret=creds_info["client_secret"],
+          refresh_token=yt_secrets["refresh_token"],
+          client_id=yt_secrets["client_id"],
+          client_secret=yt_secrets["client_secret"],
           token_uri="https://oauth2.googleapis.com/token",
       )
       if creds and creds.expired and creds.refresh_token:
@@ -61,21 +57,49 @@ if uploaded_files:
       st.error(f"YouTube Authentication Failed: {e}")
       st.stop()
 
-    # Process each uploaded video one by one
     for idx, uploaded_file in enumerate(uploaded_files):
-      st.markdown(f"--- \n### Processing: {uploaded_file.name}")
+      st.markdown(f"--- \n### Processing: `{uploaded_file.name}`")
 
-      # Save uploaded file temporarily to disk for processing
+      # Save full video temporarily
       with tempfile.NamedTemporaryFile(
           delete=False, suffix=os.path.splitext(uploaded_file.name)[1]
-      ) as tmp_file:
-        tmp_file.write(uploaded_file.read())
-        tmp_path = tmp_file.name
+      ) as tmp_video:
+        tmp_video.write(uploaded_file.read())
+        video_path = tmp_video.name
+
+      audio_path = video_path + ".mp3"
 
       try:
-        # 1. Transcribe via Groq Whisper API (Free & Fast)
-        with st.spinner("Transcribing audio using free Groq Whisper..."):
-          with open(tmp_path, "rb") as audio_file:
+        # 1. Extract & Compress Audio to MP3 using ffmpeg (Bypasses the 25MB file limit!)
+        with st.spinner("Extracting & compressing audio..."):
+          # Converts video to a lightweight mono 16kHz MP3 file (< 5MB for shorts)
+          cmd = [
+              "ffmpeg",
+              "-y",
+              "-i",
+              video_path,
+              "-vn",
+              "-acodec",
+              "libmp3lame",
+              "-ar",
+              "16000",
+              "-ac",
+              "1",
+              "-b:a",
+              "64k",
+              audio_path,
+          ]
+          subprocess.run(
+              cmd,
+              stdout=subprocess.PIPE,
+              stderr=subprocess.PIPE,
+              text=True,
+              check=True,
+          )
+
+        # 2. Transcribe via Groq Whisper API using the small audio file
+        with st.spinner("Transcribing audio via Groq Whisper..."):
+          with open(audio_path, "rb") as audio_file:
             transcript_res = groq_client.audio.transcriptions.create(
                 model="whisper-large-v3-turbo", file=audio_file
             )
@@ -85,8 +109,8 @@ if uploaded_files:
             "Transcript Preview", transcript_text, height=80, key=f"tr_{idx}"
         )
 
-        # 2. Generate Title & Description via AI
-        with st.spinner("Generating title & description..."):
+        # 3. Generate Title & Description via AI
+        with st.spinner("Generating SEO Title & Description..."):
           prompt = f"""
                     Based on this transcript, generate a catchy YouTube Short title (max 60 chars, optimized for engagement) and an engaging description with relevant hashtags (#Shorts included).
                     
@@ -103,10 +127,10 @@ if uploaded_files:
                 base_url="https://openrouter.ai/api/v1",
                 api_key=openrouter_api_key,
             )
-            model_name = "google/gemma-4-31b-it:free"
+            model_name = "anthropic/claude-3.5-sonnet"
           else:
             ai_client = groq_client
-            model_name = "llama-3.3-70b-versatile"  # Free on Groq
+            model_name = "llama-3.3-70b-versatile"
 
           response = ai_client.chat.completions.create(
               model=model_name, messages=[{"role": "user", "content": prompt}]
@@ -122,7 +146,7 @@ if uploaded_files:
 
         st.success(f"Generated Title: {title}")
 
-        # 3. Upload to YouTube
+        # 4. Upload original video file to YouTube
         with st.spinner("Uploading to YouTube..."):
           body = {
               "snippet": {
@@ -135,7 +159,7 @@ if uploaded_files:
           }
 
           media = googleapiclient.http.MediaFileUpload(
-              tmp_path, chunksize=-1, resumable=True
+              video_path, chunksize=-1, resumable=True
           )
           request = youtube_service.videos().insert(
               part="snippet,status", body=body, media_body=media
@@ -147,15 +171,18 @@ if uploaded_files:
 
           video_id = response.get("id")
           st.success(
-              f"Successfully Uploaded! Video ID: {video_id} 🔗"
+              f"Uploaded Successfully! Video ID: {video_id} 🔗"
               f" https://youtu.be/{video_id}"
           )
 
       except Exception as e:
-        st.error(f"Error processing {uploaded_file.name}: {e}")
+        st.error(f"Error processing file: {e}")
 
       finally:
-        if os.path.exists(tmp_path):
-          os.remove(tmp_path)
+        # Cleanup temporary files
+        if os.path.exists(video_path):
+          os.remove(video_path)
+        if os.path.exists(audio_path):
+          os.remove(audio_path)
 
     st.balloons()
